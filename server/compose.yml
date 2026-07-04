@@ -1,0 +1,20 @@
+services:
+  db:
+    image: mongo:latest
+    container_name: node_db
+    ports:
+      - 27017:27017
+    volumes:
+      - node_db:/data/db
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=root
+      - MONGO_INITDB_ROOT_PASSWORD=root
+
+  cache:
+    image: redis:latest
+    container_name: node_cache
+    ports:
+      - "6379:6379"
+
+volumes:
+  node_db:
