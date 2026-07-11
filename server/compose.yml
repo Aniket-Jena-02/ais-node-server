@@ -1,4 +1,11 @@
 services:
+  server:
+      build:
+        context: .
+      env_file:
+        - .env.docker
+      ports:
+        - 4000:4000
   db:
     image: mongo:latest
     container_name: node_db

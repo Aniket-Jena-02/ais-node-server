@@ -79,7 +79,11 @@ export const corsOptions: cors.CorsOptions = {
 initSocket(server, corsOptions);
 
 // ---- Security & core middleware ----
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: {
+    policy: "cross-origin",
+  }
+}));
 app.use(cors(corsOptions));
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser(env.COOKIE_SECRET));
@@ -115,10 +119,6 @@ app.get("/health", (req, res) => {
 app.use("/auth", authLimiter, authRouter);
 app.use("/channels", channelRouter);
 
-app.use("/uploads", (req, res, next) => {
-  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-  next();
-});
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
 // ---- 404 handler ----
