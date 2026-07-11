@@ -5,8 +5,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - "server/**"
 
 jobs:
   deploy:
@@ -32,19 +30,19 @@ jobs:
       - uses: google-github-actions/setup-gcloud@v2
 
       - run: |
-          gcloud auth configure-docker asia-south1-docker.pkg.dev
+          gcloud auth configure-docker asia-south2-docker.pkg.dev
 
       - run: |
           docker build \
-          -t asia-south1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/ether/server:${{ github.sha }} .
+          -t asia-south2-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/ether/server:${{ github.sha }} .
 
       - run: |
           docker push \
-          asia-south1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/ether/server:${{ github.sha }}
+          asia-south2-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/ether/server:${{ github.sha }}
 
       - run: |
           gcloud run deploy ether-server \
-            --image asia-south1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/ether/server:${{ github.sha }} \
-            --region asia-south1 \
+            --image asia-south2-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/ether/server:${{ github.sha }} \
+            --region asia-south2 \
             --platform managed \
             --allow-unauthenticated
