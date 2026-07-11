@@ -1,15 +1,57 @@
 import "dotenv/config";
 import express from "express";
 import mongoose from "mongoose";
-import z from "zod/v4";
-import { UserModel } from "./models/user.js";
-import argon2 from "argon2";
-import jwt from "jsonwebtoken";
+import cors from "cors";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
 import cookieParser from "cookie-parser";
-import { checkUserAuth } from "./utils.js";
+import http from "http";
+import { z } from "zod";
+import authRouter from "./routes/auth.js";
+import channelRouter from "./routes/channel.js";
+import { initSocket } from "./socket.js";
+import path from "node:path";
 
+declare global {
+  namespace Express {
+    interface Request {
+      user: {
+        id: string;
+        name: string;
+      };
+    }
+  }
+}
+
+// ---- Environment validation ----
+// Fail fast and loud instead of crashing later with a cryptic error.
+const envSchema = z.object({
+  NODE_ENV: z
+    .enum(["development", "production", "test"])
+    .default("development"),
+  PORT: z.coerce.number().int().default(3000),
+  MONGO_URI: z.string().min(1, "MONGO_URI is required"),
+  // Comma-separated list, e.g. "https://app.example.com,https://admin.example.com"
+  ALLOWED_ORIGINS: z.string().min(1, "ALLOWED_ORIGINS is required"),
+  COOKIE_SECRET: z.string().min(1).optional(),
+});
+
+const parsedEnv = envSchema.safeParse(process.env);
+if (!parsedEnv.success) {
+  console.error(
+    "Invalid environment variables:",
+    parsedEnv.error.flatten().fieldErrors,
+  );
+  process.exit(1);
+}
+const env = parsedEnv.data;
+const isProd = env.NODE_ENV === "production";
+
+const allowedOrigins = env.ALLOWED_ORIGINS.split(",").map((o) => o.trim());
+
+// ---- Database ----
 try {
-  await mongoose.connect(process.env.MONGO_URI!);
+  await mongoose.connect(env.MONGO_URI);
   console.log("MongoDB connected");
 } catch (error) {
   console.error("Failed to connect to MongoDB", error);
@@ -17,136 +59,115 @@ try {
 }
 
 const app = express();
-app.use(express.json());
-app.use(cookieParser());
+export const server = http.createServer(app);
+
+app.set("trust proxy", 1);
+
+// ---- CORS: single source of truth, shared by Express and Socket.IO ----
+export const corsOptions: cors.CorsOptions = {
+  origin(origin, callback) {
+    // Allow non-browser requests (curl, server-to-server, health checks) with no Origin header.
+    if (!origin || allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error(`Origin ${origin} not allowed by CORS`));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PATCH", "DELETE"],
+};
+
+initSocket(server, corsOptions);
+
+// ---- Security & core middleware ----
+app.use(helmet());
+app.use(cors(corsOptions));
+app.use(express.json({ limit: "1mb" }));
+app.use(cookieParser(env.COOKIE_SECRET));
+
+// Basic rate limiting — tune per route as needed (e.g. tighter on /auth).
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 300000, //change
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use(globalLimiter);
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20000,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 app.get("/", (req, res) => {
-  res.json({ msg: "Hello world" });
+  return res.json({ msg: "Hello world" });
 });
 
-app.post("/auth/register", async (req, res) => {
-  const schema = z.object({
-    name: z.string().min(3),
-    email: z.email(),
-    password: z.string().min(6).max(20),
-  });
-  const result = schema.safeParse(req.body);
-
-  if (!result.success) {
-    res.status(400).json({
-      msg: "Malformed input",
-    });
-  }
-
-  const isExisting = await UserModel.findOne({
-    email: result.data?.email,
-  });
-
-  if (isExisting) {
-    res.status(400).json({
-      msg: "User already exists",
-    });
-  }
-
-  const hashedPassword = await argon2.hash(result.data?.password!);
-  const user = await UserModel.create({
-    ...result.data,
-    password: hashedPassword,
-  });
-
-  const token = jwt.sign({ user_id: user.id }, process.env.JWT_SECRET!, {
-    expiresIn: "7d",
-  });
-  res.cookie("user_auth", token, {
-    path: "/",
-    maxAge: 60 * 60 * 24 * 7, // 1 week
-    httpOnly: true,
-    sameSite: process.env.ENV === "production" ? "none" : "lax",
-    secure: process.env.ENV === "production",
-  });
-
-  res.json({
-    msg: "User created and logged in successfully",
+// Lightweight health check for load balancers / uptime monitors — no DB dependency.
+app.get("/health", (req, res) => {
+  return res.json({
+    status: "ok",
+    mongoConnected: mongoose.connection.readyState === 1,
   });
 });
 
-app.post("/auth/login", async (req, res) => {
-  const schema = z.object({
-    email: z.email(),
-    password: z.string().min(6),
-  });
-  const result = schema.safeParse(req.body);
+app.use("/auth", authLimiter, authRouter);
+app.use("/channels", channelRouter);
 
-  if (!result.success) {
-    res.status(400).json({
-      msg: "Malformed input",
-    });
-  }
+app.use("/uploads", (req, res, next) => {
+  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  next();
+});
+app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 
-  const user = await UserModel.findOne({
-    email: result.data?.email,
-  });
-
-  if (!user) {
-    res.status(400).json({
-      msg: "User not found",
-    });
-  }
-
-  const isValidPassword = await argon2.verify(
-    user?.password!,
-    result.data?.password!,
-  );
-
-  if (!isValidPassword) {
-    res.status(400).json({
-      msg: "Invalid credentials",
-    });
-  }
-
-  const token = jwt.sign({ user_id: user?.id }, process.env.JWT_SECRET!, {
-    expiresIn: "7d",
-  });
-  res.cookie("user_auth", token, {
-    path: "/",
-    maxAge: 60 * 60 * 24 * 7, // 1 week
-    httpOnly: true,
-    sameSite: process.env.ENV === "production" ? "none" : "lax",
-    secure: process.env.ENV === "production",
-  });
-
-  res.json({
-    msg: "Logged in successfully",
-  });
+// ---- 404 handler ----
+app.use((req, res) => {
+  res.status(404).json({ msg: "Not found" });
 });
 
-app.get("/auth/me", async (req, res) => {
-  const token = req.cookies.user_auth;
-  const { isValid, user } = await checkUserAuth(token);
-  if (!isValid) {
-    res.status(400).json({
-      msg: "Invalid token",
-    });
-  }
+// ---- Global error handler (must be last, must have 4 args) ----
+app.use(
+  (
+    err: Error,
+    req: express.Request,
+    res: express.Response,
+    next: express.NextFunction,
+  ) => {
+    console.error(err);
+    if (
+      err.message?.startsWith("Origin ") &&
+      err.message.endsWith("not allowed by CORS")
+    ) {
+      return res.status(403).json({ msg: "Not allowed by CORS" });
+    }
+    res
+      .status(500)
+      .json({ msg: isProd ? "Internal server error" : err.message });
+  },
+);
 
-  if (!user) {
-    res.status(400).json({
-      msg: "User not found",
-    });
-  }
-
-  res.json({
-    userName: user?.name,
-    userId: user?._id,
-  });
+const listener = server.listen(env.PORT, () => {
+  console.log(`Listening on port ${env.PORT} (${env.NODE_ENV})`);
 });
 
-app.post("/auth/logout", async (req, res) => {
-  res.clearCookie("user_auth");
-  res.json({
-    msg: "Logged out successfully",
+// ---- Graceful shutdown ----
+function shutdown(signal: string) {
+  console.log(`${signal} received, shutting down gracefully`);
+  listener.close(async () => {
+    await mongoose.connection.close();
+    console.log("Closed out remaining connections");
+    process.exit(0);
   });
-});
+  // Force-exit if connections don't close in time.
+  setTimeout(() => {
+    console.error("Forcing shutdown after timeout");
+    process.exit(1);
+  }, 10_000).unref();
+}
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
 
-app.listen(process.env.PORT || 3000);
-console.log("Listening on http://localhost:3000");
+process.on("unhandledRejection", (reason) => {
+  console.error("Unhandled promise rejection:", reason);
+});

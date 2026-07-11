@@ -1,5 +1,6 @@
 import jwt, { JwtPayload } from "jsonwebtoken";
 import { UserModel } from "./models/user.js";
+import { LastReadModel } from "./models/lastRead.js";
 
 export const checkUserAuth = async (token: string | undefined) => {
   if (!token) {
@@ -39,4 +40,30 @@ export const checkUserAuth = async (token: string | undefined) => {
     isValid: true,
     user,
   };
+};
+
+export const upsertLastRead = async (
+  userId: string,
+  channelId: string,
+  messageId?: string | null,
+) => {
+  if (!messageId) return null;
+
+  await LastReadModel.findOneAndUpdate(
+    {
+      userId,
+      channelId,
+    },
+    {
+      lastReadMessageId: messageId,
+      lastReadAt: new Date(),
+    },
+    {
+      upsert: true,
+      returnDocument: "after",
+      setDefaultsOnInsert: true,
+    },
+  );
+
+  return messageId;
 };
