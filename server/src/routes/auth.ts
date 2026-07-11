@@ -45,7 +45,7 @@ authRouter.post("/register", async (req, res) => {
     path: "/",
     maxAge: 1000 * 60 * 60 * 24 * 7, // 1 week
     httpOnly: true,
-    sameSite: process.env.ENV === "production" ? "none" : "lax",
+    sameSite: "none",
     secure: process.env.ENV === "production",
   });
 
@@ -95,7 +95,7 @@ authRouter.post("/login", async (req, res) => {
     path: "/",
     maxAge: 1000 * 60 * 60 * 24 * 7, // 1 week
     httpOnly: true,
-    sameSite: process.env.ENV === "production" ? "none" : "lax",
+    sameSite: "none",
     secure: process.env.ENV === "production",
   });
 
