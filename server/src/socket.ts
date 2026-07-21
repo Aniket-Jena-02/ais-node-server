@@ -188,7 +188,7 @@ export function initSocket(server: http.Server, corsOptions: CorsOptions) {
         const newMsg = await MessageModel.create({
           author: id,
           channelId: parsed.data.channelId,
-          content: parsed.data.content,
+          content: (parsed.data.file && parsed.data.content.length > 0) ? parsed.data.content : "",
           replyTo: parsed.data.replyTo || null,
           ...(parsed.data.file && { file: parsed.data.file }),
         });

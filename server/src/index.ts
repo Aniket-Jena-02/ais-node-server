@@ -24,7 +24,6 @@ declare global {
 }
 
 // ---- Environment validation ----
-// Fail fast and loud instead of crashing later with a cryptic error.
 const envSchema = z.object({
   NODE_ENV: z
     .enum(["development", "production", "test"])
@@ -40,7 +39,7 @@ const parsedEnv = envSchema.safeParse(process.env);
 if (!parsedEnv.success) {
   console.error(
     "Invalid environment variables:",
-    parsedEnv.error.flatten().fieldErrors,
+    z.prettifyError(parsedEnv.error),
   );
   process.exit(1);
 }

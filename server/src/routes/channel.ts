@@ -567,22 +567,13 @@ channelRouter.post("/:id/upload", auth, upload.single("file"), async (req, res) 
       if (file.mimetype.startsWith("image/")) {
         finalName = `${randomUUID()}.webp`;
         finalMimeType = "image/webp";
-        // sharp will throw if the bytes don't actually match an image format —
-        // caught below rather than crashing the request. This also means we
-        // never trust the client-supplied mimetype in isolation: if someone
-        // labels an arbitrary file "image/png", sharp rejects it here.
-        await sharp(file.path).webp({ quality: 50 }).toFile(path.join(UPLOAD_DIR, finalName));
+        await sharp(file.path).webp({ quality: 82 }).toFile(path.join(UPLOAD_DIR, finalName));
         await fs.unlink(file.path);
       } else if (file.mimetype === "application/pdf") {
         finalName = `${randomUUID()}.pdf`;
         finalMimeType = "application/pdf";
-        // fs.rename MOVES the file — do not also unlink file.path afterward,
-        // it no longer exists at that location.
         await fs.rename(file.path, path.join(UPLOAD_DIR, finalName));
       } else {
-        // Shouldn't be reachable given the schema whitelist above, but guard
-        // against silently leaking a temp file if the allowed-types list ever
-        // grows without a matching branch here.
         await fs.unlink(file.path).catch(() => {});
         return res.status(400).json({ msg: "Unsupported file type" });
       }

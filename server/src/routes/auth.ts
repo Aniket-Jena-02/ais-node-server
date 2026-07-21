@@ -112,7 +112,12 @@ authRouter.get("/me", auth, async (req, res) => {
 });
 
 authRouter.post("/logout", async (req, res) => {
-  res.clearCookie("user_auth");
+  res.clearCookie("user_auth", {
+    path: "/",
+    sameSite: "none",
+    httpOnly: true,
+    secure: process.env.ENV === "production",
+  });
   return res.json({
     msg: "Logged out successfully",
   });

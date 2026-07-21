@@ -2,7 +2,6 @@ import { NextFunction, Request, Response } from "express";
 import { checkUserAuth } from "./utils.js";
 import multer from "multer";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
 
 export async function auth(req: Request, res: Response, next: NextFunction) {
   const token = req.cookies.user_auth;
